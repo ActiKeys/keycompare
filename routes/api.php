@@ -1,9 +1,10 @@
 <?php
 
+use App\Http\Controllers\Api\MediaApiController;
 use App\Http\Controllers\ImportController;
 use Illuminate\Support\Facades\Route;
 
-// JSON import endpoint (for Python scripts and manual uploads)
+// JSON import endpoint
 Route::post('/import', [ImportController::class, 'import'])->name('import.api');
 
 // Public JSON API
@@ -21,4 +22,11 @@ Route::get('/stats', function () {
         'offers' => \App\Models\Offer::count(),
         'stores' => \App\Models\Store::count(),
     ];
+});
+
+// Media API (used by image picker)
+Route::prefix('media')->group(function () {
+    Route::get('/', [MediaApiController::class, 'index']);
+    Route::post('/upload', [MediaApiController::class, 'upload']);
+    Route::get('/{medium}', [MediaApiController::class, 'show']);
 });
