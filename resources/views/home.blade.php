@@ -49,11 +49,11 @@
     @if($featured->count() > 0)
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         @foreach($featured as $product)
-        @php $best = $product->bestOffer; @endphp
+        @php $best = $product->bestOffer; $img = $product->display_image; @endphp
         <a href="{{ route('products.show', $product->id) }}" class="bg-white border border-slate-200 rounded-xl p-4 hover:shadow-lg transition-shadow">
             <div class="flex gap-3">
-                @if($product->image_link)
-                <img src="{{ $product->image_link }}" class="w-20 h-20 object-cover rounded-lg flex-shrink-0" alt="" onerror="this.style.display='none'">
+                @if($img)
+                <img src="{{ $img }}" alt="{{ $product->name }}" class="w-20 h-20 object-cover rounded-lg flex-shrink-0" onerror="this.style.display='none'">
                 @else
                 <div class="w-20 h-20 bg-gradient-to-br from-slate-100 to-slate-200 rounded-lg flex-shrink-0 flex items-center justify-center text-slate-400">
                     <i class="fas fa-cube text-2xl"></i>

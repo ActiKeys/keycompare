@@ -45,6 +45,8 @@ class ProductImportService
      *   - Offers: upsert by `link`. If exists, update; else create.
      *   - Stores: get-or-create by `name` (slug auto-generated).
      */
+    public function __construct(private MediaService $media) {}
+
     public function import(array $data, string $source = 'manual'): ImportLog
     {
         $startedAt = microtime(true);
@@ -59,6 +61,8 @@ class ProductImportService
         $productsUpdated = 0;
         $offersCreated = 0;
         $offersUpdated = 0;
+        $mediaAttached = 0;
+        $mediaFailed = 0;
 
         $products = $data['products'] ?? [];
         if (!is_array($products)) {
@@ -94,6 +98,31 @@ class ProductImportService
                     }
                 }
             });
+
+            // After the main transaction: download images (best-effort, network calls)
+            foreach (Product::with('featuredImage')->get() as $product) {
+                if (empty($product->image_link)) continue;
+                if ($product->featuredImage) continue; // already have one
+
+                try {
+                    $media = $this->media->downloadAndAttach(
+                        model: $product,
+                        collection: 'featured',
+                        url: $product->image_link,
+                        altText: $product->name,
+                        isFeatured: true,
+                    );
+                    if ($media) $mediaAttached++;
+                    else $mediaFailed++;
+                } catch (\Throwable $e) {
+                    $mediaFailed++;
+                    Log::warning('import_image_download_failed', [
+                        'product' => $product->name,
+                        'url' => $product->image_link,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
         } catch (\Throwable $e) {
             $log->update([
                 'status' => 'failed',
@@ -113,6 +142,10 @@ class ProductImportService
             'products_updated' => $productsUpdated,
             'errors' => $errors,
             'duration_ms' => $duration,
+            'meta' => [
+                'media_attached' => $mediaAttached,
+                'media_failed' => $mediaFailed,
+            ],
         ]);
 
         return $log;

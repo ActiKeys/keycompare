@@ -11,8 +11,9 @@
         <!-- Left: product info -->
         <div class="lg:col-span-1">
             <div class="bg-white border border-slate-200 rounded-xl overflow-hidden sticky top-20">
-                @if($product->image_link)
-                <img src="{{ $product->image_link }}" class="w-full aspect-square object-cover" alt="{{ $product->name }}">
+                @php $img = $product->display_image; @endphp
+                @if($img)
+                <img src="{{ $img }}" class="w-full aspect-square object-cover" alt="{{ $product->name }}" onerror="this.outerHTML='<div class=&quot;w-full aspect-square bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center text-slate-400&quot;><i class=&quot;fas fa-cube text-6xl&quot;></i></div>'">
                 @else
                 <div class="w-full aspect-square bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center text-slate-400">
                     <i class="fas fa-cube text-6xl"></i>

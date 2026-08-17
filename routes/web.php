@@ -12,5 +12,5 @@ Route::get('/products/{id}', [ProductController::class, 'show'])->name('products
 // Search
 Route::get('/search', [ProductController::class, 'index'])->name('search');
 
-// Filament admin (under /admin)
-Route::prefix('admin')->middleware([])->group(base_path('routes/admin.php'));
+// Admin (under /admin)
+Route::prefix('admin')->name('admin.')->group(base_path('routes/admin.php'));
