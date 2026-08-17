@@ -20,7 +20,8 @@
             <p class="text-slate-500">Installation wizard</p>
         </div>
 
-        <!-- Stepper -->
+        <!-- Stepper (skip on tools page) -->
+        @if(($step ?? 1) !== 'tools')
         <div class="flex items-center justify-between mb-8 px-2">
             @php
                 $steps = [
@@ -48,6 +49,7 @@
             </div>
             @endforeach
         </div>
+        @endif
 
         <!-- Content -->
         <div class="bg-white rounded-2xl shadow-xl border border-slate-200 p-8">

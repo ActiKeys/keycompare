@@ -5,7 +5,7 @@ use App\Http\Controllers\InstallerController;
 use App\Http\Controllers\ProductController;
 use Illuminate\Support\Facades\Route;
 
-// Installer (only accessible when not installed)
+// Installer (only accessible when not installed) — EXCEPT tools
 Route::middleware('not_installed')->prefix('install')->name('installer.')->group(function () {
     Route::get('/', [InstallerController::class, 'index']);
     Route::get('/welcome', [InstallerController::class, 'welcome'])->name('welcome');
@@ -18,6 +18,10 @@ Route::middleware('not_installed')->prefix('install')->name('installer.')->group
     Route::post('/settings', [InstallerController::class, 'saveSettings'])->name('save_settings');
     Route::get('/done', [InstallerController::class, 'done'])->name('done');
 });
+
+// System tools (always available, even after install)
+Route::get('/install/tools', [InstallerController::class, 'tools'])->name('installer.tools');
+Route::post('/install/tool', [InstallerController::class, 'runTool'])->name('installer.tool');
 
 // Public site
 Route::get('/', [ProductController::class, 'home'])->name('home');

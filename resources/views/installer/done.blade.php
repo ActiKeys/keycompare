@@ -19,17 +19,17 @@
                 </div>
                 <span class="text-indigo-600">→</span>
             </a>
-            <a href="{{ url('/admin') }}" target="_blank" class="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-lg hover:border-indigo-300">
+            <a href="{{ route('login') }}" target="_blank" class="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-lg hover:border-indigo-300">
                 <div>
-                    <div class="font-medium text-sm">⚙️ Admin panel</div>
+                    <div class="font-medium text-sm">⚙️ Admin login</div>
                     <div class="text-xs text-slate-500">Manage products, media, and imports</div>
                 </div>
                 <span class="text-indigo-600">→</span>
             </a>
-            <a href="{{ url('/admin/media') }}" target="_blank" class="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-lg hover:border-indigo-300">
+            <a href="{{ route('installer.tools') }}" class="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-lg hover:border-indigo-300">
                 <div>
-                    <div class="font-medium text-sm">📸 Media library</div>
-                    <div class="text-xs text-slate-500">Upload and manage images</div>
+                    <div class="font-medium text-sm">🔧 System tools</div>
+                    <div class="text-xs text-slate-500">Clear cache, fix permissions, run migrations</div>
                 </div>
                 <span class="text-indigo-600">→</span>
             </a>
@@ -39,23 +39,37 @@
     <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-4 mb-6">
         <h2 class="font-semibold text-sm mb-2 text-indigo-900">📥 Importing products</h2>
         <p class="text-xs text-indigo-800 mb-3">Your API import token (save this somewhere safe):</p>
-        <code class="block bg-white border border-indigo-200 rounded p-2 text-xs font-mono break-all">{{ $import_token ?: '(not set — anyone can import)' }}</code>
+        <div class="flex gap-2">
+            <code class="flex-1 bg-white border border-indigo-200 rounded p-2 text-xs font-mono break-all select-all" id="token">{{ $import_token ?: '(not set — anyone can import)' }}</code>
+            <button onclick="navigator.clipboard.writeText(document.getElementById('token').textContent); this.textContent='Copied!'; setTimeout(() => this.textContent='Copy', 2000)" class="px-3 py-1 bg-indigo-600 text-white rounded text-xs whitespace-nowrap">Copy</button>
+        </div>
         <div class="mt-3 text-xs text-indigo-800 space-y-1">
-            <div><strong>Python:</strong> <code>python /path/to/examples/push_products.py data.json --url {{ url('/api/import') }} --token {{ $import_token }}</code></div>
-            <div><strong>curl:</strong> <code>curl -X POST {{ url('/api/import') }} -H "Content-Type: application/json" -H "Authorization: Bearer {{ $import_token }}" -d @data.json</code></div>
+            <div><strong>curl:</strong></div>
+            <code class="block bg-white border border-indigo-200 rounded p-2 text-[11px] font-mono break-all">curl -X POST {{ url('/api/import') }} -H "Content-Type: application/json" -H "Authorization: Bearer {{ $import_token }}" -d @data.json</code>
         </div>
     </div>
 
     @if($admin)
     <div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-4 text-sm mb-6">
-        <strong>👤 Signed in as:</strong> {{ $admin->name }} ({{ $admin->email }})<br>
-        <a href="{{ url('/admin') }}" class="text-amber-900 underline">Click here to go to the admin panel</a>
+        <strong>👤 Signed in as:</strong> {{ $admin->name }} ({{ $admin->email }})
+        <br>
+        <a href="{{ route('admin.products.index') }}" class="text-amber-900 underline">→ Go to admin panel</a>
     </div>
     @endif
 
+    <div class="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-6 text-xs text-slate-600">
+        <h2 class="font-semibold text-sm text-slate-900 mb-2">🛠️ cPanel management tips</h2>
+        <ul class="space-y-1 list-disc list-inside">
+            <li>Need to fix permissions or clear cache? Visit <a href="{{ route('installer.tools') }}" class="text-indigo-600">System tools</a></li>
+            <li>To re-run the installer: visit <a href="{{ route('installer.tools') }}" class="text-indigo-600">System tools → Reset installation</a></li>
+            <li>PHP errors are logged in <code class="text-[10px]">storage/logs/laravel.log</code></li>
+            <li>For cron jobs (scheduled tasks): use cPanel → Cron Jobs</li>
+        </ul>
+    </div>
+
     <div class="text-center">
-        <a href="{{ url('/') }}" class="inline-block px-6 py-2 bg-slate-900 text-white rounded-lg text-sm font-medium hover:bg-slate-800">
-            Visit your site →
+        <a href="{{ route('admin.products.index') }}" class="inline-block px-6 py-3 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">
+            Go to admin panel →
         </a>
     </div>
 @endsection

@@ -7,7 +7,8 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class InstallerController extends Controller
 {
@@ -37,12 +38,16 @@ class InstallerController extends Controller
 
     /**
      * Step 1: Welcome & requirements check.
+     * Auto-fixes what it can (creates .env, generates APP_KEY, creates dirs).
      */
-    public function welcome()
+    public function welcome(Request $request)
     {
         if (self::isInstalled()) {
             return redirect('/');
         }
+
+        // Try to auto-fix common issues
+        $autoFixed = $this->autoFixSetup();
 
         $requirements = $this->checkRequirements();
 
@@ -50,7 +55,119 @@ class InstallerController extends Controller
             'step' => 1,
             'requirements' => $requirements,
             'allPassed' => collect($requirements)->every(fn($r) => $r['ok']),
+            'autoFixed' => $autoFixed,
         ]);
+    }
+
+    /**
+     * Run automatic setup tasks to make the installer work without CLI.
+     * Returns array of actions taken.
+     */
+    protected function autoFixSetup(): array
+    {
+        $actions = [];
+
+        // 1. Create .env from .env.example if missing
+        $envPath = base_path('.env');
+        if (!file_exists($envPath)) {
+            if (file_exists(base_path('.env.example'))) {
+                copy(base_path('.env.example'), $envPath);
+                $actions[] = 'Created .env from .env.example';
+            }
+        }
+
+        // 2. Generate APP_KEY if empty
+        $envContent = file_exists($envPath) ? file_get_contents($envPath) : '';
+        if ($envContent && !preg_match('/^APP_KEY=base64:.+/m', $envContent)) {
+            $key = 'base64:' . base64_encode(random_bytes(32));
+            $envContent = preg_replace('/^APP_KEY=.*$/m', "APP_KEY={$key}", $envContent);
+            if (!str_contains($envContent, "APP_KEY={$key}")) {
+                $envContent .= "\nAPP_KEY={$key}\n";
+            }
+            file_put_contents($envPath, $envContent);
+            $actions[] = 'Generated APP_KEY';
+        }
+
+        // 3. Generate IMPORT_API_TOKEN if empty
+        $envContent = file_exists($envPath) ? file_get_contents($envPath) : '';
+        if ($envContent && !preg_match('/^IMPORT_API_TOKEN=.+/m', $envContent)) {
+            $token = Str::random(32);
+            $envContent = preg_replace('/^IMPORT_API_TOKEN=.*$/m', "IMPORT_API_TOKEN={$token}", $envContent);
+            if (!str_contains($envContent, "IMPORT_API_TOKEN={$token}")) {
+                $envContent .= "\nIMPORT_API_TOKEN={$token}\n";
+            }
+            file_put_contents($envPath, $envContent);
+            $actions[] = 'Generated IMPORT_API_TOKEN';
+        }
+
+        // 4. Create required directories
+        $dirs = [
+            'storage/framework/cache/data',
+            'storage/framework/sessions',
+            'storage/framework/views',
+            'storage/logs',
+            'storage/app/public',
+            'bootstrap/cache',
+        ];
+        foreach ($dirs as $dir) {
+            $path = base_path($dir);
+            if (!is_dir($path)) {
+                @mkdir($path, 0755, true);
+                $actions[] = "Created $dir";
+            }
+        }
+
+        // 5. Create .gitignore placeholders
+        foreach (['storage/framework/cache/data', 'storage/framework/sessions', 'storage/framework/views', 'storage/logs'] as $dir) {
+            $gitignore = base_path($dir . '/.gitignore');
+            if (!file_exists($gitignore)) {
+                file_put_contents($gitignore, "*\n!.gitignore\n");
+            }
+        }
+
+        // 6. Try to create storage symlink (may fail on shared hosting)
+        if (!file_exists(public_path('storage'))) {
+            $storagePublic = base_path('storage/app/public');
+            if (is_dir($storagePublic)) {
+                try {
+                    symlink($storagePublic, public_path('storage'));
+                    $actions[] = 'Created public/storage symlink';
+                } catch (\Throwable $e) {
+                    // Fallback: copy
+                    $this->recurseCopy($storagePublic, public_path('storage'));
+                    $actions[] = 'Copied public/storage (symlink not allowed)';
+                }
+            }
+        }
+
+        // 7. Try to set permissions (best-effort)
+        @chmod(base_path('.env'), 0644);
+        @chmod(base_path('storage'), 0755);
+        @chmod(base_path('bootstrap/cache'), 0755);
+        @chmod(base_path('database'), 0755);
+
+        return $actions;
+    }
+
+    /**
+     * Recursive copy (used as fallback when symlinks not allowed).
+     */
+    protected function recurseCopy(string $src, string $dst): void
+    {
+        if (!is_dir($dst)) {
+            @mkdir($dst, 0755, true);
+        }
+        $items = scandir($src);
+        foreach ($items as $item) {
+            if ($item === '.' || $item === '..') continue;
+            $s = $src . '/' . $item;
+            $d = $dst . '/' . $item;
+            if (is_dir($s)) {
+                $this->recurseCopy($s, $d);
+            } else {
+                copy($s, $d);
+            }
+        }
     }
 
     /**
@@ -61,13 +178,16 @@ class InstallerController extends Controller
         if (self::isInstalled()) {
             return redirect('/');
         }
+
+        $envContent = file_exists(base_path('.env')) ? file_get_contents(base_path('.env')) : '';
+
         return view('installer.database', [
             'step' => 2,
             'defaults' => [
-                'host' => 'localhost',
-                'port' => '3306',
-                'database' => '',
-                'username' => '',
+                'host' => $this->getEnvValue('DB_HOST', 'localhost'),
+                'port' => $this->getEnvValue('DB_PORT', '3306'),
+                'database' => $this->getEnvValue('DB_DATABASE', ''),
+                'username' => $this->getEnvValue('DB_USERNAME', ''),
                 'password' => '',
             ],
         ]);
@@ -122,7 +242,7 @@ class InstallerController extends Controller
             'password' => 'nullable|string',
         ]);
 
-        // Write to .env (or create from .env.example)
+        // Make sure DB_CONNECTION is mysql
         $this->writeEnv([
             'DB_CONNECTION' => 'mysql',
             'DB_HOST' => $data['host'],
@@ -132,7 +252,12 @@ class InstallerController extends Controller
             'DB_PASSWORD' => $data['password'] ?? '',
         ]);
 
-        // Test the connection with the new env
+        // Clear any cached config
+        if (file_exists(base_path('bootstrap/cache/config.php'))) {
+            @unlink(base_path('bootstrap/cache/config.php'));
+        }
+
+        // Test the connection
         try {
             DB::purge();
             DB::connection()->getPdo();
@@ -200,7 +325,7 @@ class InstallerController extends Controller
         return view('installer.settings', [
             'step' => 4,
             'defaults' => [
-                'app_name' => 'KeyCompare',
+                'app_name' => $this->getEnvValue('APP_NAME', 'KeyCompare'),
                 'app_url' => url('/'),
             ],
         ]);
@@ -216,22 +341,20 @@ class InstallerController extends Controller
             'import_token' => 'nullable|string|max:255',
         ]);
 
+        $token = $data['import_token'] ?: $this->getEnvValue('IMPORT_API_TOKEN', Str::random(32));
+
         $this->writeEnv([
             'APP_NAME' => '"' . $data['app_name'] . '"',
-            'IMPORT_API_TOKEN' => $data['import_token'] ?: \Illuminate\Support\Str::random(32),
+            'IMPORT_API_TOKEN' => $token,
         ]);
 
-        // Storage symlink
-        if (!file_exists(public_path('storage'))) {
-            try {
-                Artisan::call('storage:link');
-            } catch (\Throwable $e) {
-                // ignore — symlink might not be supported
-            }
+        // Clear config cache so new .env takes effect
+        if (file_exists(base_path('bootstrap/cache/config.php'))) {
+            @unlink(base_path('bootstrap/cache/config.php'));
         }
 
         // Mark as installed
-        file_put_contents(storage_path('app/installed.lock'), now()->toIso8601String());
+        @file_put_contents(storage_path('app/installed.lock'), now()->toIso8601String());
 
         // Auto-login the admin (find first admin user)
         $admin = \App\Models\User::where('is_admin', true)->first();
@@ -258,6 +381,131 @@ class InstallerController extends Controller
         ]);
     }
 
+    // ===== Tools (always available, even after install) =====
+
+    /**
+     * System tools for troubleshooting (permissions, cache, etc).
+     */
+    public function tools()
+    {
+        $checks = [
+            'php_version' => [
+                'label' => 'PHP version',
+                'ok' => version_compare(PHP_VERSION, '8.2.0', '>='),
+                'value' => PHP_VERSION,
+                'required' => '8.2.0+',
+            ],
+            'env_exists' => [
+                'label' => '.env file',
+                'ok' => file_exists(base_path('.env')),
+            ],
+            'env_writable' => [
+                'label' => '.env writable',
+                'ok' => is_writable(base_path('.env')),
+            ],
+            'storage_writable' => [
+                'label' => 'storage/ writable',
+                'ok' => is_writable(base_path('storage')),
+            ],
+            'bootstrap_cache_writable' => [
+                'label' => 'bootstrap/cache writable',
+                'ok' => is_writable(base_path('bootstrap/cache')),
+            ],
+            'public_storage_exists' => [
+                'label' => 'public/storage exists',
+                'ok' => file_exists(public_path('storage')),
+            ],
+            'installed' => [
+                'label' => 'System installed',
+                'ok' => self::isInstalled(),
+            ],
+        ];
+
+        return view('installer.tools', [
+            'step' => 'tools',
+            'checks' => $checks,
+            'allOk' => collect($checks)->every(fn($c) => $c['ok']),
+        ]);
+    }
+
+    /**
+     * Run a specific tool action via POST.
+     */
+    public function runTool(Request $request)
+    {
+        $action = $request->input('action');
+
+        switch ($action) {
+            case 'fix_permissions':
+                @chmod(base_path('storage'), 0755);
+                @chmod(base_path('storage/app'), 0755);
+                @chmod(base_path('storage/app/public'), 0755);
+                @chmod(base_path('storage/framework'), 0755);
+                @chmod(base_path('storage/framework/cache'), 0755);
+                @chmod(base_path('storage/framework/cache/data'), 0755);
+                @chmod(base_path('storage/framework/sessions'), 0755);
+                @chmod(base_path('storage/framework/views'), 0755);
+                @chmod(base_path('storage/logs'), 0755);
+                @chmod(base_path('bootstrap/cache'), 0755);
+                @chmod(base_path('database'), 0755);
+                @chmod(base_path('.env'), 0644);
+                if (file_exists(public_path('storage'))) {
+                    @chmod(public_path('storage'), 0755);
+                }
+                return back()->with('success', 'Permissions set (0755 for dirs, 0644 for files)');
+
+            case 'create_storage_link':
+                if (file_exists(public_path('storage'))) {
+                    return back()->with('error', 'public/storage already exists');
+                }
+                try {
+                    symlink(base_path('storage/app/public'), public_path('storage'));
+                    return back()->with('success', 'Symlink created');
+                } catch (\Throwable $e) {
+                    // Fallback to copy
+                    $this->recurseCopy(base_path('storage/app/public'), public_path('storage'));
+                    return back()->with('success', 'Symlink not allowed, copied instead');
+                }
+
+            case 'clear_cache':
+                try {
+                    Artisan::call('cache:clear');
+                    Artisan::call('config:clear');
+                    Artisan::call('view:clear');
+                    Artisan::call('route:clear');
+                    return back()->with('success', 'All caches cleared');
+                } catch (\Throwable $e) {
+                    return back()->with('error', 'Cache clear failed: ' . $e->getMessage());
+                }
+
+            case 'storage_link':
+                try {
+                    Artisan::call('storage:link');
+                    return back()->with('success', 'Storage link created');
+                } catch (\Throwable $e) {
+                    return back()->with('error', 'Storage link failed: ' . $e->getMessage());
+                }
+
+            case 'migrate':
+                try {
+                    Artisan::call('migrate', ['--force' => true]);
+                    return back()->with('success', 'Migrations ran successfully');
+                } catch (\Throwable $e) {
+                    return back()->with('error', 'Migration failed: ' . $e->getMessage());
+                }
+
+            case 'reset_installation':
+                $lockFile = storage_path('app/installed.lock');
+                if (file_exists($lockFile)) {
+                    unlink($lockFile);
+                }
+                return redirect()->route('installer.welcome')->with('success', 'Installation reset. Re-running installer.');
+
+            default:
+                return back()->with('error', 'Unknown action: ' . $action);
+        }
+    }
+
     // ===== Helpers =====
 
     protected function checkRequirements(): array
@@ -275,7 +523,7 @@ class InstallerController extends Controller
             ],
             'storage' => [
                 'label' => 'Storage directory writable',
-                'ok' => is_writable(storage_path()),
+                'ok' => is_writable(base_path('storage')),
             ],
             'bootstrap' => [
                 'label' => 'Bootstrap cache writable',
@@ -284,7 +532,8 @@ class InstallerController extends Controller
             ],
             'env' => [
                 'label' => '.env file writable',
-                'ok' => is_writable(base_path('.env')) || !file_exists(base_path('.env')) && is_writable(base_path()),
+                'ok' => file_exists(base_path('.env')) && is_writable(base_path('.env'))
+                    || (!file_exists(base_path('.env')) && is_writable(base_path())),
             ],
         ];
     }
@@ -296,6 +545,20 @@ class InstallerController extends Controller
             if (!extension_loaded($ext)) return false;
         }
         return true;
+    }
+
+    /**
+     * Read a value from .env file.
+     */
+    protected function getEnvValue(string $key, string $default = ''): string
+    {
+        $path = base_path('.env');
+        if (!file_exists($path)) return $default;
+        $content = file_get_contents($path);
+        if (preg_match("/^{$key}=(.*)$/m", $content, $m)) {
+            return trim($m[1], " \t\"'");
+        }
+        return $default;
     }
 
     /**
@@ -315,7 +578,6 @@ class InstallerController extends Controller
         $content = file_get_contents($path);
         foreach ($values as $key => $value) {
             $value = (string) $value;
-            // Quote if contains spaces or special chars
             if (preg_match('/\s|"|\'|#/', $value) && !str_starts_with($value, '"')) {
                 $value = '"' . str_replace('"', '\"', $value) . '"';
             }
